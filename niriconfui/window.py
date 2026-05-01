@@ -182,10 +182,17 @@ class NiriConfUIWindow(Adw.ApplicationWindow):
                 return
 
     def _on_save(self, _btn) -> None:
-        if not self._state.backup_exists():
-            self._state.create_backup()
-        self._state.save()
-        self._show_toast("Configuração salva em niriconfui.kdl")
+        try:
+            if not self._state.backup_exists():
+                self._state.create_backup()
+            include_existed = self._state.ensure_include()
+            self._state.save()
+            if not include_existed:
+                self._show_toast("Salvo — include adicionado ao config.kdl")
+            else:
+                self._show_toast("Configuração salva em niriconfui.kdl")
+        except Exception as e:
+            self._show_toast(f"Erro ao salvar: {e}")
 
     def _show_toast(self, message: str) -> None:
         self._toast_overlay.add_toast(Adw.Toast.new(message))

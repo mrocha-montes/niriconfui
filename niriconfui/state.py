@@ -4,7 +4,7 @@ Fluxo de inicialização:
 1. Lê o config.kdl original do usuário
 2. Extrai os valores pra popular a UI
 3. Escreve niriconfui.kdl com as configs gerenciadas
-4. O config.kdl do usuário é preservado intacto (só leitura)
+4. O config.kdl do usuário só é tocado pra adicionar o include
 """
 
 from __future__ import annotations
@@ -26,56 +26,34 @@ class RuntimeInfo:
 
 @dataclass
 class ConfigData:
-    """Dados extraídos do config do niri, prontos pra UI consumir."""
-
-    # outputs: dict nome -> dict de props
     outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-    # raw kdl do config original (preservado intacto)
     raw_user_kdl: str = ""
-
-    # se o app_config já existia antes
     app_config_existed: bool = False
 
 
 class AppState:
-    """Estado central. Única fonte de verdade da aplicação."""
-
     def __init__(self) -> None:
         self._runtime = RuntimeInfo()
         self._config = ConfigData()
         self._dirty = False
-        self._managed_nodes: dict[str, Any] = {}  # nodes que o niriconfui gerencia
-
-    # ------------------------------------------------------------------ #
-    # Inicialização                                                        #
-    # ------------------------------------------------------------------ #
 
     def load(self) -> None:
-        """Carrega estado completo. Chamado uma vez na inicialização."""
         from niriconfui import niri_ipc
-
         self._runtime = RuntimeInfo(
             niri_running=niri_ipc.is_niri_running(),
             has_touchpad=niri_ipc.has_touchpad(),
             niri_version=niri_ipc.get_version(),
         )
-
         self._config = ConfigData(
             app_config_existed=APP_CONFIG.exists(),
         )
-
-        # Lê o config do usuário se existir
         if USER_CONFIG.exists():
             self._config.raw_user_kdl = USER_CONFIG.read_text(encoding="utf-8")
             self._extract_user_config()
-
-        # Lê o app config se já existir (sobrescreve o que foi extraído do user)
         if APP_CONFIG.exists():
             self._load_app_config()
 
     def _extract_user_config(self) -> None:
-        """Extrai valores do config.kdl do usuário sem modificá-lo."""
         try:
             import kdl
             doc = kdl.parse(self._config.raw_user_kdl)
@@ -85,12 +63,9 @@ class AppState:
                     if name:
                         self._config.outputs[name] = self._extract_output_node(node)
         except Exception:
-            # Config do usuário pode ter sintaxe que a lib não entende ainda
-            # Não é fatal — a UI abre vazia e o usuário configura do zero
             pass
 
     def _extract_output_node(self, node: Any) -> dict[str, Any]:
-        """Extrai props de um node output em dict plano."""
         data: dict[str, Any] = {}
         for child in node.nodes:
             if child.name == "mode" and child.args:
@@ -109,7 +84,6 @@ class AppState:
         return data
 
     def _load_app_config(self) -> None:
-        """Carrega o niriconfui.kdl se já existir."""
         try:
             import kdl
             text = APP_CONFIG.read_text(encoding="utf-8")
@@ -118,7 +92,6 @@ class AppState:
                 if node.name == "output":
                     name = node.args[0] if node.args else None
                     if name:
-                        # app config tem precedência sobre user config extraído
                         self._config.outputs[name] = self._extract_output_node(node)
         except Exception:
             pass
@@ -128,7 +101,6 @@ class AppState:
     # ------------------------------------------------------------------ #
 
     def create_backup(self) -> Path:
-        """Cria backup do config do usuário. Obrigatório antes de qualquer escrita."""
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         dest = BACKUP_DIR / "config.kdl"
         if USER_CONFIG.exists():
@@ -142,14 +114,36 @@ class AppState:
     # Escrita                                                              #
     # ------------------------------------------------------------------ #
 
+    def ensure_include(self) -> bool:
+        """Garante que config.kdl tem include 'niriconfui.kdl'.
+
+        Retorna True se já existia, False se foi adicionado agora.
+        """
+        if not USER_CONFIG.exists():
+            return False
+
+        content = USER_CONFIG.read_text(encoding="utf-8")
+        include_line = 'include "niriconfui.kdl"'
+
+        if include_line in content:
+            return True
+
+        addition = (
+            "\n"
+            "// Gerenciado pelo niriconfui — não remova esta linha\n"
+            f"{include_line}\n"
+        )
+        USER_CONFIG.write_text(content + addition, encoding="utf-8")
+        return False
+
     def save(self) -> None:
-        """Escreve niriconfui.kdl. Nunca toca no config.kdl do usuário."""
+        """Escreve niriconfui.kdl e garante o include no config.kdl."""
         APP_CONFIG.parent.mkdir(parents=True, exist_ok=True)
         APP_CONFIG.write_text(self._render_app_config(), encoding="utf-8")
+        self.ensure_include()
         self._dirty = False
 
     def _render_app_config(self) -> str:
-        """Gera o conteúdo do niriconfui.kdl a partir do estado atual."""
         lines = ["// Gerenciado pelo niriconfui — não edite manualmente\n"]
         for name, props in self._config.outputs.items():
             lines.append(self._render_output(name, props))
