@@ -1,0 +1,27 @@
+[project]
+name = "niriconfui"
+version = "0.1.0"
+description = "A GTK4 configuration GUI for the niri Wayland compositor"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "mrocha-montes" }]
+requires-python = ">=3.11"
+dependencies = [
+    "kdl-py>=1.0.0",
+]
+
+[project.scripts]
+niriconfui = "niriconfui.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["niriconfui"]
